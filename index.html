@@ -546,11 +546,32 @@ function setTab(t){tab=t;document.querySelectorAll("nav button").forEach(b=>b.se
 document.querySelectorAll("nav button").forEach(b=>b.addEventListener("click",()=>{if(tab==="day"&&b.dataset.tab!=="day"&&dirty){setStatus("Unsaved changes — tap Save day first")}setTab(b.dataset.tab)}));
 if(location.hash==="#month")tab="month";
 
+/* ---------- LOCAL STORAGE (for hosting outside Claude, e.g. Vercel) ---------- */
+function localDb(){
+  const P="sitrundi:";
+  let ok=true; try{localStorage.setItem(P+"t","1");localStorage.removeItem(P+"t")}catch(e){ok=false}
+  if(!ok) return null;
+  const subs=[];
+  const get=k=>{try{const v=localStorage.getItem(P+k);return v?JSON.parse(v):null}catch(e){return null}};
+  const snapDoc=k=>{const v=get(k);return{exists:!!v,data:()=>v}};
+  const snapCol=c=>{const docs=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith(P+c+"/")){const v=get(k.slice(P.length));if(v)docs.push({data:()=>v})}}return{docs}};
+  const fire=()=>subs.forEach(f=>{try{f()}catch(e){}});
+  window.addEventListener("storage",e=>{if(e.key&&e.key.startsWith(P))fire()});
+  return{
+    doc:k=>({
+      set:async v=>{localStorage.setItem(P+k,JSON.stringify(v));fire()},
+      onSnapshot:(cb)=>{const f=()=>cb(snapDoc(k));subs.push(f);f();return()=>{}}
+    }),
+    collection:c=>({onSnapshot:(cb)=>{const f=()=>cb(snapCol(c));subs.push(f);f();return()=>{}}})
+  };
+}
+function localDownloads(){return{save:async({filename,data})=>{const u=URL.createObjectURL(new Blob([data],{type:"text/csv"}));const a=document.createElement("a");a.href=u;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000)}}}
+
 /* ---------- BOOT ---------- */
 loadDay(today); setTab(tab);
 (async()=>{
-  try{ if(!window.claude||!claude.use){setStatus();return}
-    db=await claude.use("db"); downloads=await claude.use("downloads").catch(()=>null);
+  try{ if(window.claude&&claude.use){db=await claude.use("db"); downloads=await claude.use("downloads").catch(()=>null);}
+    else{db=localDb(); downloads=localDownloads();}
     if(!db){setStatus();return}
     setStatus();
     db.doc("config/menu").onSnapshot(s=>{const d=s.exists&&s.data();if(d&&Array.isArray(d.items)&&d.items.length){menu=d.items.map(x=>({...x}));menuIsDefault=false}
